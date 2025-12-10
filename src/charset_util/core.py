@@ -1,5 +1,6 @@
 from typing import Optional, Union
 import charset_normalizer
+import ftfy
 
 def detect(content: Union[bytes, str]) -> dict:
     """
@@ -48,3 +49,18 @@ def convert(content: bytes, target_encoding: str = "utf-8") -> str:
         return content.decode(target_encoding, errors='replace')
         
     return str(result)
+
+def repair(text: str) -> str:
+    """
+    Fix text that is broken due to encoding mix-ups (mojibake).
+    
+    This function uses ftfy (Fixes Text For You) to repair strings that were 
+    decoded with the wrong encoding (e.g., utf-8 decoded as latin-1).
+    
+    Args:
+        text: The string containing potential mojibake.
+        
+    Returns:
+        The fixed string.
+    """
+    return ftfy.fix_text(text)

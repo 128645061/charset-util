@@ -18,6 +18,7 @@ classifiers = [
 ]
 dependencies = [
     "charset-normalizer>=3.0.0",
+    "ftfy>=6.0.0",
 ]
 
 [project.urls]
