@@ -110,7 +110,7 @@ class BalancedUnescapedStrategy(BalanceBracesStrategy):
         unescaped = content.replace('\\"', '"')
         return super().apply(unescaped)
 
-class PartialTruncationStrategy(BalanceBracesStrategy):
+class PartialTruncationStrategy(BalancedUnescapedStrategy):
     """
     Strategy 5: Partial Truncation Repair
     策略5：局部截断修复
@@ -119,25 +119,52 @@ class PartialTruncationStrategy(BalanceBracesStrategy):
     e.g. {"msg": "Hello Wor -> {"msg": "Hello Wor"}
     e.g. {"msg": "Hello \\u4f -> {"msg": "Hello "} (Trims incomplete escape)
     处理截断发生在字符串内部或转义序列中间的情况。
+    
+    Inherits from BalancedUnescapedStrategy to handle escaped quotes as well.
+    继承自 BalancedUnescapedStrategy 以同时处理转义引号。
     """
     def apply(self, content: str) -> Optional[Any]:
-        # Trim incomplete escape sequences at the end
-        # 去除末尾不完整的转义序列
-        # Matches backslash followed by 0-5 chars that are NOT quotes or end of string
-        # This is a heuristic: if we see a backslash near the end, we cut it off.
+        # Trim dangling structural characters and incomplete escapes
+        # Repeat until no more changes
+        while True:
+            content = content.rstrip()
+            original_len = len(content)
+            
+            # 1. Trim incomplete escape sequences at the end
+            # Matches backslash at the very end
+            if content.endswith('\\'):
+                logger.debug("PartialTruncationStrategy: Trimming trailing backslash")
+                content = content[:-1]
+                continue
+
+            # 2. If ends with comma, remove it
+            if content.endswith(','):
+                logger.debug("PartialTruncationStrategy: Trimming trailing comma")
+                content = content[:-1]
+                continue
+            
+            # 3. If ends with quote (or escaped quote), check if it's an OPENING quote
+            # Heuristic: It's an opening quote if it follows a comma, {, or [
+            if content.endswith('"'):
+                # Check what comes before the quote
+                # Handle escaped quote \"
+                quote_len = 1
+                if content.endswith('\\"'):
+                    quote_len = 2
+                
+                # Look behind
+                pre_quote = content[:-quote_len].rstrip()
+                logger.debug(f"Pre-quote end: {repr(pre_quote[-10:])}")
+                
+                if pre_quote and (pre_quote.endswith(',') or pre_quote.endswith('{') or pre_quote.endswith('[')):
+                    logger.debug(f"PartialTruncationStrategy: Trimming trailing quote (len={quote_len})")
+                    content = content[:-quote_len]
+                    continue
+            
+            if len(content) == original_len:
+                break
         
-        # Pattern: backslash followed by optional 'u' and 0-3 hex digits at the end of string
-        # 模式：反斜杠后跟可选的 'u' 和 0-3 个十六进制数字，位于字符串末尾
-        if '\\' in content[-6:]:
-            # If the string ends with something that looks like an incomplete escape
-            # e.g. \, \u, \u4, \u4f, \u4f6
-            # We aggressively trim back to the last safe character
-            for i in range(1, 7):
-                if content[-i] == '\\':
-                    # Cut off from the backslash onwards
-                    content = content[:-i]
-                    break
-        
+        # logger.debug(f"PartialTruncationStrategy: Content after trimming: {content[-50:]}")
         return super().apply(content)
 
 class HTMLUnescapeStrategy(RecoveryStrategy):
