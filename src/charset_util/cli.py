@@ -3,7 +3,7 @@ import sys
 import json
 import logging
 from .encoding import detect, convert
-from .recovery import repair_mojibake, recover_json
+from .recovery import repair_mojibake, decode_unicode_escapes
 
 def setup_logging(verbose: bool):
     level = logging.DEBUG if verbose else logging.WARNING
@@ -38,10 +38,10 @@ def main():
     repair_parser.add_argument("file", help="Path to the file containing mojibake")
     repair_parser.add_argument("-o", "--output", help="Path to output file (default: stdout)")
 
-    # Command: recover-json
-    recover_parser = subparsers.add_parser("recover-json", help="Recover truncated/messy JSON")
-    recover_parser.add_argument("file", help="Path to the file containing messy JSON")
-    recover_parser.add_argument("-o", "--output", help="Path to output file (default: stdout)")
+    # Command: decode-escapes
+    decode_parser = subparsers.add_parser("decode-escapes", help="Decode unicode escapes (e.g. \\u4f60) in text")
+    decode_parser.add_argument("file", help="Path to the file containing unicode escapes")
+    decode_parser.add_argument("-o", "--output", help="Path to output file (default: stdout)")
 
     args = parser.parse_args()
 
@@ -83,16 +83,15 @@ def main():
             else:
                 print(result)
 
-        elif args.command == "recover-json":
+        elif args.command == "decode-escapes":
             with open(args.file, "rb") as f:
                 content_bytes = f.read()
-            # recover_json handles bytes or str
-            data = recover_json(content_bytes)
-            result = json.dumps(data, indent=2, ensure_ascii=False)
+            content_str = convert(content_bytes)
+            result = decode_unicode_escapes(content_str)
             if args.output:
                 with open(args.output, "w", encoding="utf-8") as f:
                     f.write(result)
-                print(f"Recovered JSON written to {args.output}")
+                print(f"Decoded content written to {args.output}")
             else:
                 print(result)
 

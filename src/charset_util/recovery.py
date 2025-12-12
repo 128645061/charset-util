@@ -1,31 +1,6 @@
-import json
-import re
-from typing import Any, Union, Optional, Tuple
 import ftfy
-from .strategies import JsonRecoveryPipeline
-import logging
-
-from dataclasses import dataclass
-
-logger = logging.getLogger(__name__)
-
-@dataclass
-class ExtractionResult:
-    """
-    Result of extracting and recovering JSON from a larger string.
-    从字符串中提取和恢复JSON的结果。
-    """
-    prefix: str
-    data: Any
-    suffix: str
-    
-    def json_string(self) -> str:
-        """Return the recovered data as a JSON string."""
-        return json.dumps(self.data, ensure_ascii=False)
-    
-    def full_string(self) -> str:
-        """Reconstruct the full string with recovered JSON."""
-        return f"{self.prefix}{self.json_string()}{self.suffix}"
+import re
+from typing import List
 
 def repair_mojibake(text: str) -> str:
     """
@@ -44,148 +19,40 @@ def repair_mojibake(text: str) -> str:
     """
     return ftfy.fix_text(text)
 
-def recursive_decode(obj: Any) -> Any:
+def decode_unicode_escapes(text: str) -> str:
     """
-    Recursively traverse the object and fix double-escaped strings in keys and values.
-    递归遍历对象，修复键和值中的双重转义字符串。
+    Extracts and decodes all Unicode escape sequences (like \\u4f60 or \\u0041) found in the text.
+    Replaces the escape sequences with their corresponding characters.
+    正则匹配文本中可以解析的 Unicode 转义序列（如 \\u4f60 或 \\u0041）并进行解析替换。
     
-    Uses an iterative approach to prevent RecursionError on deep structures.
-    使用迭代方法以防止在深层结构上发生 RecursionError。
+    This is useful for texts that contain raw unicode escapes mixed with other content.
+    对于混合了原始 Unicode 转义符和其他内容的文本非常有用。
     
-    e.g. "\\u5e94" -> "应"
-    """
-    # Use a stack for iterative traversal
-    # 使用栈进行迭代遍历
-    # Stack items: (parent_container, key_or_index, item_to_process)
-    
-    # Root handling is a bit special because we need to return the transformed root.
-    # So we wrap it in a dummy list.
-    dummy_root = [obj]
-    stack = [(dummy_root, 0, obj)]
-    
-    while stack:
-        parent, key, current = stack.pop()
+    Args:
+        text: Input string containing potential unicode escapes.
         
-        if isinstance(current, dict):
-            # For dicts, we need to create a new dict to handle key transformation
-            # But since we are modifying in-place via parent reference, we can't easily swap the dict object itself
-            # without more complex logic. 
-            # Simplified approach: Transform keys immediately, then push values to stack.
-            
-            # Wait, modifying keys in-place is hard.
-            # Let's switch strategy: We build a NEW structure? 
-            # No, iterative building is hard. 
-            # Let's stick to modifying the PARENT's reference.
-            
-            new_dict = {}
-            for k, v in current.items():
-                # Transform key
-                new_k = k
-                if isinstance(k, str) and '\\u' in k:
-                    try:
-                        new_k = k.encode('utf-8').decode('unicode_escape')
-                    except:
-                        pass
-                
-                # We put 'v' into the new dict, but we also push it to stack to be transformed later.
-                # The stack will update new_dict[new_k] when it processes 'v'.
-                new_dict[new_k] = v
-                stack.append((new_dict, new_k, v))
-            
-            # Replace the old dict in the parent with the new dict
-            parent[key] = new_dict
-            
-        elif isinstance(current, list):
-            # For lists, we can modify in-place
-            for i, item in enumerate(current):
-                stack.append((current, i, item))
-                
-        elif isinstance(current, str):
-            if '\\u' in current:
-                try:
-                    decoded = current.encode('utf-8').decode('unicode_escape')
-                    parent[key] = decoded
-                except:
-                    pass
-        else:
-            # Primitive types, do nothing
-            pass
-            
-    return dummy_root[0]
-
-def recover_json(content: Union[str, bytes]) -> Any:
+    Returns:
+        String with unicode escapes decoded.
     """
-    A generalized parser for messy JSON-like strings.
-    用于处理混乱 JSON 字符串的通用解析器。
+    # Pattern to match \u followed by 4 hex digits
+    # We use a lambda in sub to decode each match individually
     
-    Strategies:
-    1. Basic JSON load. (基础 JSON 加载)
-    2. Unescape quotes (\") -> " and load. (去除转义引号并加载)
-    3. Balance brackets/braces and load. (平衡括号并加载)
-    4. Recursive unicode decoding for keys/values. (对键/值进行递归 Unicode 解码)
-    """
-    data, _ = recover_json_with_suffix(content)
-    return data
-
-def recover_json_with_suffix(content: Union[str, bytes]) -> Tuple[Any, str]:
-    """
-    Recover JSON and return the parsed data along with any unused suffix/garbage.
-    恢复JSON并返回解析后的数据以及任何未使用的后缀/垃圾数据。
-    """
-    if isinstance(content, bytes):
+    # Logic:
+    # 1. Match literal \u followed by 4 hex digits.
+    # 2. Convert hex to char.
+    # 3. Replace in string.
+    
+    def replace_match(match):
+        escape_seq = match.group(0) # e.g. \u4f60
         try:
-            content = content.decode('utf-8')
+            # We encode to ascii (escaping non-ascii) then decode using unicode_escape
+            # But simpler: just take the hex part and chr() it.
+            hex_val = match.group(1)
+            return chr(int(hex_val, 16))
         except:
-            logger.debug("Failed to decode bytes as utf-8, trying ignore errors")
-            content = content.decode('utf-8', errors='ignore')
-            
-    # Try 1: Direct load (unlikely for messy data but good baseline)
-    # 尝试 1: 直接加载（虽然对于脏数据不太可能成功，但作为一个良好的基准）
-    try:
-        data = json.loads(content)
-        logger.debug("Successfully loaded JSON directly")
-        return recursive_decode(data), ""
-    except:
-        logger.debug("Direct JSON load failed, falling back to pipeline")
-        pass
-    
-    # Use the pipeline for advanced recovery strategies
-    # 使用流水线进行高级修复策略
-    pipeline = JsonRecoveryPipeline()
-    try:
-        data, suffix = pipeline.process_with_suffix(content)
-        return recursive_decode(data), suffix
-    except ValueError as e:
-        raise e
+            return escape_seq
 
-def extract_and_recover(content: Union[str, bytes]) -> ExtractionResult:
-    """
-    Extract JSON from a larger string, recover it, and return the parts.
-    从较大字符串中提取 JSON，进行修复，并返回各部分（前缀、数据、后缀）。
+    # Pattern: backslash u followed by 4 hex chars
+    pattern = re.compile(r'\\u([0-9a-fA-F]{4})')
     
-    This is useful when the input string contains non-JSON prefixes or suffixes that you want to preserve.
-    当输入字符串包含您希望保留的非 JSON 前缀或后缀时，这很有用。
-    """
-    if isinstance(content, bytes):
-        try:
-            content = content.decode('utf-8')
-        except:
-            content = content.decode('utf-8', errors='ignore')
-
-    # Find start of JSON
-    match = re.search(r'[\{\[]', content)
-    if not match:
-        raise ValueError("No JSON-like structure found")
-    
-    start_idx = match.start()
-    prefix = content[:start_idx]
-    json_candidate = content[start_idx:]
-    
-    # Use recover_json_with_suffix to get the data and any leftover garbage/suffix
-    data, suffix = recover_json_with_suffix(json_candidate)
-    
-    return ExtractionResult(
-        prefix=prefix,
-        data=data,
-        suffix=suffix
-    )
+    return pattern.sub(replace_match, text)
