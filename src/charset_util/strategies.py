@@ -222,6 +222,106 @@ class PartialTruncationStrategy(BalancedUnescapedStrategy):
         result = super().apply(trimmed)
         return result, suffix
 
+class RegexExtractionStrategy(RecoveryStrategy):
+    """
+    Strategy 7: Regex Key-Value Extraction (Heuristic)
+    策略7：正则键值提取（启发式）
+    
+    Ignores global JSON structure and attempts to extract "key": value pairs directly.
+    Useful when the JSON is heavily truncated or contains garbage, but local structure is preserved.
+    Does not strictly enforce JSON validity, focuses on data recovery.
+    忽略全局JSON结构，尝试直接提取"key": value对。
+    当JSON严重截断或包含垃圾数据，但局部结构保留时非常有用。
+    不严格强制JSON有效性，专注于数据恢复。
+    """
+    def apply(self, content: str) -> Optional[Any]:
+        # 1. Unescape escaped quotes (often found in nested JSON strings)
+        content = content.replace('\\"', '"')
+        
+        # 2. Pattern to find "key": value
+        # Captures key in group 1
+        # Value matching is tricky. We assume value starts after : and ends at , or } or EOF
+        # But value can contain , or } inside quotes or braces.
+        
+        # We will use a simpler approach: Match "key": and then try to parse value using json decoder
+        # This is more robust than pure regex for values.
+        
+        data = {}
+        
+        # Find all keys
+        # Pattern: "key" \s* :
+        # Key must be a string.
+        key_pattern = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:\s*')
+        
+        pos = 0
+        while pos < len(content):
+            match = key_pattern.search(content, pos)
+            if not match:
+                break
+            
+            key = match.group(1)
+            # Try to decode unicode in key
+            try:
+                key = key.encode('utf-8').decode('unicode_escape')
+            except:
+                pass
+                
+            value_start = match.end()
+            
+            # Try to parse value using json.JSONDecoder.raw_decode
+            # This decodes ONE valid JSON value (object, list, string, number, etc.)
+            try:
+                decoder = json.JSONDecoder()
+                value, value_end_offset = decoder.raw_decode(content, value_start)
+                data[key] = value
+                pos = value_end_offset
+            except json.JSONDecodeError as e:
+                logger.debug(f"JSON decode error for key {key} at {value_start}: {e}")
+                # If standard decoding fails (e.g. truncated value), we try to recover the value heuristically
+                # Look for the next comma or closing brace?
+                # This is hard. If we fail to parse value, we might skip this key or try to grab a string?
+                
+                # Heuristic: If value starts with {, try to balance it
+                rest = content[value_start:].strip()
+                if rest.startswith('{'):
+                    # Try to find a balanced brace
+                    balancer = BalanceBracesStrategy()
+                    balanced_val = balancer._balance_json(rest) # Reuse internal method? No, it's not exposed well.
+                    # Let's just instantiate strategy
+                    balanced_result = balancer.apply(rest)
+                    if balanced_result is not None:
+                        data[key] = balanced_result
+                        # Approximate new pos: regex match next key? 
+                        # We don't know where this value ended in original string easily without re-matching.
+                        # But since we are extracting ALL keys, we can just continue search from value_start + 1
+                        pos = value_start + 1 
+                    else:
+                         pos = value_start + 1
+                elif rest.startswith('"'):
+                     # Truncated string?
+                     # Find next " or end of line
+                     end_quote = rest.find('"', 1)
+                     if end_quote != -1:
+                         val_str = rest[:end_quote+1]
+                         try:
+                             data[key] = json.loads(val_str)
+                             pos = value_start + end_quote + 1
+                         except:
+                             pos = value_start + 1
+                     else:
+                         # Unclosed string, take everything?
+                         data[key] = rest[1:] # Raw string without opening quote
+                         pos = len(content)
+                else:
+                    # Primitive? Number?
+                    # Just skip
+                    pos = value_start + 1
+                    
+        if not data:
+            return None
+            
+        return data
+
 class HTMLUnescapeStrategy(RecoveryStrategy):
     """
     Strategy 6: HTML Unescape
@@ -260,7 +360,8 @@ class JsonRecoveryPipeline:
             BalanceBracesStrategy(),
             BalancedUnescapedStrategy(),
             PartialTruncationStrategy(),
-            HTMLUnescapeStrategy()
+            HTMLUnescapeStrategy(),
+            RegexExtractionStrategy()
         ]
 
     def process(self, content: str) -> Any:
