@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 import json
 import re
 import logging
@@ -25,6 +25,22 @@ class RecoveryStrategy(ABC):
             The parsed data if successful, None otherwise. (成功返回解析后的数据，失败返回None)
         """
         pass
+    
+    def apply_with_suffix(self, content: str) -> Tuple[Optional[Any], str]:
+        """
+        Attempt to recover data and return the unused suffix.
+        尝试恢复数据并返回未使用的后缀。
+        
+        Args:
+            content: The string content to parse
+            
+        Returns:
+            Tuple of (parsed_data, suffix).
+            If parsing failed, parsed_data is None.
+            Default implementation returns empty suffix if successful.
+        """
+        result = self.apply(content)
+        return result, ""
 
 class DirectLoadStrategy(RecoveryStrategy):
     """
@@ -123,9 +139,8 @@ class PartialTruncationStrategy(BalancedUnescapedStrategy):
     Inherits from BalancedUnescapedStrategy to handle escaped quotes as well.
     继承自 BalancedUnescapedStrategy 以同时处理转义引号。
     """
-    def apply(self, content: str) -> Optional[Any]:
-        # Trim dangling structural characters and incomplete escapes
-        # Repeat until no more changes
+    def _trim(self, content: str) -> str:
+        """Helper to trim trailing incomplete sequences."""
         while True:
             content = content.rstrip()
             original_len = len(content)
@@ -163,7 +178,7 @@ class PartialTruncationStrategy(BalancedUnescapedStrategy):
                 
                 # Look behind
                 pre_quote = content[:-quote_len].rstrip()
-                logger.debug(f"Pre-quote end: {repr(pre_quote[-10:])}")
+                # logger.debug(f"Pre-quote end: {repr(pre_quote[-10:])}")
                 
                 if pre_quote and (pre_quote.endswith(',') or pre_quote.endswith('{') or pre_quote.endswith('[')):
                     logger.debug(f"PartialTruncationStrategy: Trimming trailing quote (len={quote_len})")
@@ -193,9 +208,19 @@ class PartialTruncationStrategy(BalancedUnescapedStrategy):
             
             if len(content) == original_len:
                 break
-        
-        # logger.debug(f"PartialTruncationStrategy: Content after trimming: {content[-50:]}")
-        return super().apply(content)
+        return content
+
+    def apply(self, content: str) -> Optional[Any]:
+        trimmed = self._trim(content)
+        return super().apply(trimmed)
+
+    def apply_with_suffix(self, content: str) -> Tuple[Optional[Any], str]:
+        trimmed = self._trim(content)
+        suffix = content[len(trimmed):]
+        # Since super() is BalancedUnescapedStrategy which doesn't implement apply_with_suffix 
+        # (it uses default which returns empty string suffix), we just use super().apply()
+        result = super().apply(trimmed)
+        return result, suffix
 
 class HTMLUnescapeStrategy(RecoveryStrategy):
     """
@@ -259,6 +284,35 @@ class JsonRecoveryPipeline:
                 return result
             logger.debug(f"Strategy {strategy_name} failed")
         
+        logger.error("All recovery strategies failed")
+        raise ValueError("All recovery strategies failed")
+    
+    def process_with_suffix(self, content: str) -> Tuple[Any, str]:
+        """
+        Run the content through the pipeline strategies until one succeeds, returning data and unused suffix.
+        将内容通过流水线策略运行，直到有一个成功为止，返回数据和未使用的后缀。
+        """
+        candidate = self._extract_json_candidate(content)
+        if not candidate:
+            logger.debug("No JSON-like structure found in content")
+            raise ValueError("No JSON-like structure found")
+        
+        # Calculate prefix skipped by _extract_json_candidate to adjust suffix later?
+        # No, _extract_json_candidate returns a substring.
+        # But wait, if _extract_json_candidate trims the START, the suffix is relative to THAT substring.
+        # So we don't need to worry about the prefix here, as extract_and_recover handles the main prefix.
+        # But if process_with_suffix is called on "abc{...}xyz", candidate is "{...}xyz".
+        # If strategy uses "{...}", suffix is "xyz".
+        
+        for strategy in self.strategies:
+            strategy_name = strategy.__class__.__name__
+            logger.debug(f"Attempting strategy: {strategy_name}")
+            result, suffix = strategy.apply_with_suffix(candidate)
+            if result is not None:
+                logger.info(f"Successfully recovered JSON using strategy: {strategy_name}")
+                return result, suffix
+            logger.debug(f"Strategy {strategy_name} failed")
+            
         logger.error("All recovery strategies failed")
         raise ValueError("All recovery strategies failed")
 

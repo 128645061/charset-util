@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Any, Union, Optional
+from typing import Any, Union, Optional, Tuple
 import ftfy
 from .strategies import JsonRecoveryPipeline
 import logging
@@ -124,6 +124,14 @@ def recover_json(content: Union[str, bytes]) -> Any:
     3. Balance brackets/braces and load. (平衡括号并加载)
     4. Recursive unicode decoding for keys/values. (对键/值进行递归 Unicode 解码)
     """
+    data, _ = recover_json_with_suffix(content)
+    return data
+
+def recover_json_with_suffix(content: Union[str, bytes]) -> Tuple[Any, str]:
+    """
+    Recover JSON and return the parsed data along with any unused suffix/garbage.
+    恢复JSON并返回解析后的数据以及任何未使用的后缀/垃圾数据。
+    """
     if isinstance(content, bytes):
         try:
             content = content.decode('utf-8')
@@ -136,7 +144,7 @@ def recover_json(content: Union[str, bytes]) -> Any:
     try:
         data = json.loads(content)
         logger.debug("Successfully loaded JSON directly")
-        return recursive_decode(data)
+        return recursive_decode(data), ""
     except:
         logger.debug("Direct JSON load failed, falling back to pipeline")
         pass
@@ -145,8 +153,8 @@ def recover_json(content: Union[str, bytes]) -> Any:
     # 使用流水线进行高级修复策略
     pipeline = JsonRecoveryPipeline()
     try:
-        data = pipeline.process(content)
-        return recursive_decode(data)
+        data, suffix = pipeline.process_with_suffix(content)
+        return recursive_decode(data), suffix
     except ValueError as e:
         raise e
 
@@ -173,28 +181,11 @@ def extract_and_recover(content: Union[str, bytes]) -> ExtractionResult:
     prefix = content[:start_idx]
     json_candidate = content[start_idx:]
     
-    # We don't know exactly where the JSON ends if it's truncated or followed by garbage.
-    # But recover_json works on the "candidate" string which starts with { or [.
-    # The pipeline strategies usually handle trailing garbage by balancing or parsing.
-    # However, if we want to preserve the *original* suffix, it's tricky because 
-    # the recovery process might alter the string (e.g. unescaping quotes).
-    
-    # Simplified approach:
-    # 1. Recover the data from the candidate part.
-    # 2. Assume the suffix is empty because usually the JSON *is* the rest of the content (especially if truncated).
-    #    If there was valid content AFTER the JSON, recover_json might ignore it or fail.
-    
-    # Wait, if the user input is "PREFIX {json} SUFFIX", and {json} is broken/truncated...
-    # If it's truncated, there IS no suffix.
-    # If it's NOT truncated but just messy, maybe we can find the matching closing brace?
-    
-    # For now, let's assume the JSON extends to the end of the string (or truncation point).
-    # So suffix will be empty.
-    
-    data = recover_json(json_candidate)
+    # Use recover_json_with_suffix to get the data and any leftover garbage/suffix
+    data, suffix = recover_json_with_suffix(json_candidate)
     
     return ExtractionResult(
         prefix=prefix,
         data=data,
-        suffix="" # Assuming everything after start_idx was part of the (potentially broken) JSON
+        suffix=suffix
     )
