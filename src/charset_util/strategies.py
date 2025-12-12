@@ -136,6 +136,15 @@ class PartialTruncationStrategy(BalancedUnescapedStrategy):
                 logger.debug("PartialTruncationStrategy: Trimming trailing backslash")
                 content = content[:-1]
                 continue
+            
+            # 1b. Trim incomplete unicode escape
+            # Matches \u followed by 0-3 hex digits at the end
+            # e.g. "abc\u4" -> "abc"
+            match = re.search(r'(\\u[0-9a-fA-F]{0,3})$', content)
+            if match:
+                 logger.debug("PartialTruncationStrategy: Trimming incomplete unicode escape")
+                 content = content[:match.start()]
+                 continue
 
             # 2. If ends with comma, remove it
             if content.endswith(','):
@@ -159,6 +168,27 @@ class PartialTruncationStrategy(BalancedUnescapedStrategy):
                 if pre_quote and (pre_quote.endswith(',') or pre_quote.endswith('{') or pre_quote.endswith('[')):
                     logger.debug(f"PartialTruncationStrategy: Trimming trailing quote (len={quote_len})")
                     content = content[:-quote_len]
+                    continue
+
+            # 4. Trim garbage suffix (e.g. "(truncated)", "...", etc.)
+            # JSON never ends with ')', '.', '>'
+            if content.endswith(')'):
+                last_open = content.rfind('(')
+                if last_open != -1:
+                    logger.debug("PartialTruncationStrategy: Trimming parenthesized suffix")
+                    content = content[:last_open]
+                    continue
+            
+            if content.endswith('.'):
+                logger.debug("PartialTruncationStrategy: Trimming trailing dot")
+                content = content[:-1]
+                continue
+
+            if content.endswith('>'):
+                last_open = content.rfind('<')
+                if last_open != -1:
+                    logger.debug("PartialTruncationStrategy: Trimming <...> suffix")
+                    content = content[:last_open]
                     continue
             
             if len(content) == original_len:
