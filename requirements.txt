@@ -1,0 +1,7 @@
+# Core dependencies
+charset-normalizer>=3.0.0
+ftfy>=6.0.0
+
+# Development dependencies
+pytest>=7.0.0
+hypothesis>=6.0.0

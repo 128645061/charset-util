@@ -1,12 +1,12 @@
 import unittest
-from charset_util import detect, convert, repair
+from charset_util import detect, convert, repair_mojibake
 
 class TestCharsetUtil(unittest.TestCase):
     def test_basic_functions_exist(self):
         """Test that core functions are importable."""
         self.assertTrue(callable(detect))
         self.assertTrue(callable(convert))
-        self.assertTrue(callable(repair))
+        self.assertTrue(callable(repair_mojibake))
 
     def test_detect_utf8(self):
         """Test detection of UTF-8 content."""
@@ -27,7 +27,7 @@ class TestCharsetUtil(unittest.TestCase):
         """Test mojibake repair."""
         # Mojibake: "你好" (utf-8) interpreted as latin-1
         broken = "你好".encode('utf-8').decode('latin-1')
-        fixed = repair(broken)
+        fixed = repair_mojibake(broken)
         self.assertEqual(fixed, "你好")
 
 if __name__ == '__main__':
