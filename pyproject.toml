@@ -24,3 +24,6 @@ dependencies = [
 [project.urls]
 "Homepage" = "https://github.com/128645061/charset-util"
 "Bug Tracker" = "https://github.com/128645061/charset-util/issues"
+
+[project.scripts]
+charset-util = "charset_util.cli:main"

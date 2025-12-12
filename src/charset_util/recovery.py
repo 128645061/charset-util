@@ -3,29 +3,39 @@ import re
 from typing import Any, Union, Optional
 import ftfy
 from .strategies import JsonRecoveryPipeline
+import logging
+
+logger = logging.getLogger(__name__)
 
 def repair_mojibake(text: str) -> str:
     """
     Fix text that is broken due to encoding mix-ups (mojibake).
+    修复因编码混淆（乱码）导致的损坏文本。
     
     This function uses ftfy (Fixes Text For You) to repair strings that were 
     decoded with the wrong encoding (e.g., utf-8 decoded as latin-1).
+    此函数使用 ftfy 库来修复被错误解码的字符串（例如：将 UTF-8 误认为 Latin-1 解码）。
     
     Args:
-        text: The string containing potential mojibake.
+        text: The string containing potential mojibake. (包含潜在乱码的字符串)
         
     Returns:
-        The fixed string.
+        The fixed string. (修复后的字符串)
     """
     return ftfy.fix_text(text)
 
 def recursive_decode(obj: Any) -> Any:
     """
     Recursively traverse the object and fix double-escaped strings in keys and values.
+    递归遍历对象，修复键和值中的双重转义字符串。
+    
     Uses an iterative approach to prevent RecursionError on deep structures.
+    使用迭代方法以防止在深层结构上发生 RecursionError。
+    
     e.g. "\\u5e94" -> "应"
     """
     # Use a stack for iterative traversal
+    # 使用栈进行迭代遍历
     # Stack items: (parent_container, key_or_index, item_to_process)
     
     # Root handling is a bit special because we need to return the transformed root.
@@ -86,26 +96,33 @@ def recursive_decode(obj: Any) -> Any:
 def recover_json(content: Union[str, bytes]) -> Any:
     """
     A generalized parser for messy JSON-like strings.
+    用于处理混乱 JSON 字符串的通用解析器。
     
     Strategies:
-    1. Basic JSON load.
-    2. Unescape quotes (\") -> " and load.
-    3. Balance brackets/braces and load.
-    4. Recursive unicode decoding for keys/values.
+    1. Basic JSON load. (基础 JSON 加载)
+    2. Unescape quotes (\") -> " and load. (去除转义引号并加载)
+    3. Balance brackets/braces and load. (平衡括号并加载)
+    4. Recursive unicode decoding for keys/values. (对键/值进行递归 Unicode 解码)
     """
     if isinstance(content, bytes):
         try:
             content = content.decode('utf-8')
         except:
+            logger.debug("Failed to decode bytes as utf-8, trying ignore errors")
             content = content.decode('utf-8', errors='ignore')
             
     # Try 1: Direct load (unlikely for messy data but good baseline)
+    # 尝试 1: 直接加载（虽然对于脏数据不太可能成功，但作为一个良好的基准）
     try:
-        return recursive_decode(json.loads(content))
+        data = json.loads(content)
+        logger.debug("Successfully loaded JSON directly")
+        return recursive_decode(data)
     except:
+        logger.debug("Direct JSON load failed, falling back to pipeline")
         pass
     
     # Use the pipeline for advanced recovery strategies
+    # 使用流水线进行高级修复策略
     pipeline = JsonRecoveryPipeline()
     try:
         data = pipeline.process(content)

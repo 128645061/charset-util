@@ -2,17 +2,38 @@ from abc import ABC, abstractmethod
 from typing import Any, List, Optional
 import json
 import re
+import logging
+import html
+
+logger = logging.getLogger(__name__)
 
 class RecoveryStrategy(ABC):
+    """
+    Abstract base class for all JSON recovery strategies.
+    定义所有JSON修复策略的抽象基类。
+    """
     @abstractmethod
     def apply(self, content: str) -> Optional[Any]:
         """
         Attempt to recover data from content.
-        Returns the parsed data if successful, None otherwise.
+        尝试从内容中恢复数据。
+        
+        Args:
+            content: The string content to parse (字符串内容)
+            
+        Returns:
+            The parsed data if successful, None otherwise. (成功返回解析后的数据，失败返回None)
         """
         pass
 
 class DirectLoadStrategy(RecoveryStrategy):
+    """
+    Strategy 1: Direct Load
+    策略1：直接加载
+    
+    Attempts to parse the content as valid JSON. This is the baseline check.
+    尝试直接将内容解析为合法的JSON。这是最基本的检查。
+    """
     def apply(self, content: str) -> Optional[Any]:
         try:
             return json.loads(content)
@@ -20,6 +41,14 @@ class DirectLoadStrategy(RecoveryStrategy):
             return None
 
 class UnescapeQuotesStrategy(RecoveryStrategy):
+    """
+    Strategy 2: Unescape Quotes
+    策略2：去除转义引号
+    
+    Handles cases where JSON is embedded inside a string and quotes are escaped.
+    e.g. "{\"key\": \"value\"}" -> {"key": "value"}
+    处理JSON嵌套在字符串中且引号被转义的情况。
+    """
     def apply(self, content: str) -> Optional[Any]:
         try:
             return json.loads(content.replace('\\"', '"'))
@@ -27,6 +56,14 @@ class UnescapeQuotesStrategy(RecoveryStrategy):
             return None
 
 class BalanceBracesStrategy(RecoveryStrategy):
+    """
+    Strategy 3: Balance Braces
+    策略3：平衡括号
+    
+    Handles truncated JSON by heuristically appending missing closing braces/brackets.
+    e.g. {"key": "value" -> {"key": "value"}
+    处理被截断的JSON，通过启发式算法自动补全缺失的右括号/右中括号。
+    """
     def apply(self, content: str) -> Optional[Any]:
         balanced = self._balance_json(content)
         try:
@@ -35,9 +72,13 @@ class BalanceBracesStrategy(RecoveryStrategy):
             return None
 
     def _balance_json(self, json_str: str) -> str:
+        # If quotes are unbalanced (odd number), append a closing quote first
+        # 如果引号数量是奇数，说明字符串也被截断了，先补一个引号
         if json_str.count('"') % 2 != 0:
             json_str += '"'
         
+        # Use a stack to track opening braces/brackets
+        # 使用栈来跟踪左括号
         stack = []
         for char in json_str:
             if char == '{':
@@ -45,40 +86,123 @@ class BalanceBracesStrategy(RecoveryStrategy):
             elif char == '[':
                 stack.append(']')
             elif char == '}' or char == ']':
+                # If we encounter a closing brace, match it with the stack top
+                # 如果遇到右括号，尝试与栈顶匹配
                 if stack and stack[-1] == char:
                     stack.pop()
         
+        # Append all missing closing braces in reverse order (LIFO)
+        # 逆序补全所有缺失的右括号
         while stack:
             json_str += stack.pop()
             
         return json_str
 
 class BalancedUnescapedStrategy(BalanceBracesStrategy):
+    """
+    Strategy 4: Balanced & Unescaped
+    策略4：平衡且去除转义
+    
+    Combines unescaping quotes and balancing braces. Useful for truncated JSON strings inside other strings.
+    结合了去除转义和平衡括号。适用于嵌套在其他字符串中且被截断的JSON。
+    """
     def apply(self, content: str) -> Optional[Any]:
         unescaped = content.replace('\\"', '"')
         return super().apply(unescaped)
 
+class PartialTruncationStrategy(BalanceBracesStrategy):
+    """
+    Strategy 5: Partial Truncation Repair
+    策略5：局部截断修复
+    
+    Handles cases where truncation happens inside a string or escape sequence.
+    e.g. {"msg": "Hello Wor -> {"msg": "Hello Wor"}
+    e.g. {"msg": "Hello \\u4f -> {"msg": "Hello "} (Trims incomplete escape)
+    处理截断发生在字符串内部或转义序列中间的情况。
+    """
+    def apply(self, content: str) -> Optional[Any]:
+        # Trim incomplete escape sequences at the end
+        # 去除末尾不完整的转义序列
+        # Matches backslash followed by 0-5 chars that are NOT quotes or end of string
+        # This is a heuristic: if we see a backslash near the end, we cut it off.
+        
+        # Pattern: backslash followed by optional 'u' and 0-3 hex digits at the end of string
+        # 模式：反斜杠后跟可选的 'u' 和 0-3 个十六进制数字，位于字符串末尾
+        if '\\' in content[-6:]:
+            # If the string ends with something that looks like an incomplete escape
+            # e.g. \, \u, \u4, \u4f, \u4f6
+            # We aggressively trim back to the last safe character
+            for i in range(1, 7):
+                if content[-i] == '\\':
+                    # Cut off from the backslash onwards
+                    content = content[:-i]
+                    break
+        
+        return super().apply(content)
+
+class HTMLUnescapeStrategy(RecoveryStrategy):
+    """
+    Strategy 6: HTML Unescape
+    策略6：HTML实体反转义
+    
+    Handles JSON containing HTML entities (e.g. &quot; instead of ").
+    处理包含HTML实体的JSON。
+    """
+    def apply(self, content: str) -> Optional[Any]:
+        try:
+            unescaped = html.unescape(content)
+            # After unescaping, it might be a valid JSON or need balancing
+            # Try direct load first
+            try:
+                return json.loads(unescaped)
+            except:
+                # If failed, try balancing it (reusing logic from BalanceBracesStrategy)
+                # We instantiate BalanceBracesStrategy here or just duplicate logic?
+                # Let's use composition.
+                balancer = BalanceBracesStrategy()
+                return balancer.apply(unescaped)
+        except:
+            return None
+
 class JsonRecoveryPipeline:
+    """
+    The main pipeline that orchestrates multiple recovery strategies.
+    协调多种修复策略的主流水线。
+    """
     def __init__(self, strategies: List[RecoveryStrategy] = None):
+        # Default order of strategies: from strictest to most heuristic
+        # 默认策略顺序：从最严格（最快）到最启发式（最慢/最宽容）
         self.strategies = strategies or [
             DirectLoadStrategy(),
             UnescapeQuotesStrategy(),
             BalanceBracesStrategy(),
-            BalancedUnescapedStrategy()
+            BalancedUnescapedStrategy(),
+            PartialTruncationStrategy(),
+            HTMLUnescapeStrategy()
         ]
 
     def process(self, content: str) -> Any:
-        # Pre-processing: Extract likely JSON part
+        """
+        Run the content through the pipeline strategies until one succeeds.
+        将内容通过流水线策略运行，直到有一个成功为止。
+        """
+        # Pre-processing: Extract likely JSON part (find first '{' or '[')
+        # 预处理：提取可能的JSON部分（寻找第一个 '{' 或 '['）
         candidate = self._extract_json_candidate(content)
         if not candidate:
+            logger.debug("No JSON-like structure found in content")
             raise ValueError("No JSON-like structure found")
 
-        last_error = None
         for strategy in self.strategies:
+            strategy_name = strategy.__class__.__name__
+            logger.debug(f"Attempting strategy: {strategy_name}")
             result = strategy.apply(candidate)
             if result is not None:
+                logger.info(f"Successfully recovered JSON using strategy: {strategy_name}")
                 return result
+            logger.debug(f"Strategy {strategy_name} failed")
         
+        logger.error("All recovery strategies failed")
         raise ValueError("All recovery strategies failed")
 
     def _extract_json_candidate(self, text: str) -> Optional[str]:
