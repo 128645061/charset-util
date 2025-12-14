@@ -41,8 +41,10 @@ def detect(content: Union[bytes, str], chunk_size: Optional[int] = 1024 * 50) ->
         
     return {
         "encoding": result.encoding,
-        "confidence": result.fingerprint, # charset_normalizer uses fingerprint as a rough proxy or we can use the match object
-        # Actually charset_normalizer match object has .encoding, .coherence (confidence-ish)
+        # result.fingerprint is a SHA256 hash string in newer versions of charset-normalizer, not a float confidence!
+        # result.coherence is what we might want for confidence-like metric if available, but it's not always exposed same way.
+        # For now, let's just return 1.0 if we found a match, or use coherence if present.
+        "confidence": getattr(result, 'coherence', 1.0),
         "language": result.language
     }
 
@@ -79,8 +81,16 @@ def convert(content: bytes, target_encoding: str = "utf-8") -> str:
         try:
             return content.decode(target_encoding)
         except:
-            return content.decode('utf-8', errors='replace')
+            # If target encoding fails, try GB18030 (common for Chinese) before giving up to 'replace'
+            try:
+                return content.decode('gb18030')
+            except:
+                return content.decode('utf-8', errors='replace')
     
     # result.encoding is the detected encoding.
     # str(result) returns the decoded string using that encoding.
-    return str(result)
+    try:
+        return str(result)
+    except:
+        # If conversion fails even with detected encoding (rare but possible), fallback
+        return content.decode('utf-8', errors='replace')
