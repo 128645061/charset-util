@@ -5,6 +5,12 @@ def detect(content: Union[bytes, str], chunk_size: Optional[int] = 1024 * 50) ->
     """
     Detect the encoding of the given content.
     检测给定内容的编码。
+
+    Use Case (场景):
+    - When you receive a file (bytes) but don't know if it's UTF-8, GBK, or Latin-1.
+    - 当你收到一个文件（字节流），但不知道它是 UTF-8、GBK 还是 Latin-1 编码时。
+    - This corresponds to the "Guessing the Box" step in our tutorial.
+    - 对应教程中“猜测包装盒”的步骤。
     
     Args:
         content: The content to analyze. If string, it will be encoded to utf-8 first (trivial case).
@@ -44,6 +50,12 @@ def convert(content: bytes, target_encoding: str = "utf-8") -> str:
     """
     Convert the content to the target encoding.
     将内容转换为目标编码。
+
+    Use Case (场景):
+    - When you want to safely read a file into a Python string (Unicode), regardless of its original encoding.
+    - 当你想把文件安全地读成 Python 字符串（Unicode），而不在乎它原来是什么编码时。
+    - This corresponds to the "Unpacking" step in our tutorial: auto-detect the box type and take out the character.
+    - 对应教程中“拆快递”的步骤：自动识别盒子类型并取出字符。
     
     Args:
         content: The bytes to convert.
