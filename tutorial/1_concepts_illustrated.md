@@ -103,7 +103,32 @@ good_string = original_bytes.decode('utf-8')   # "你"
 
 ---
 
-## 4. Summary Table (总结表)
+## 4. The Mystery of Escapes (转义字符之谜) 🪄
+
+> Sometimes you see strings like `\u4f60`. This is NOT a different encoding, it's just a way to write the Unicode ID.
+> 有时你会看到像 `\u4f60` 这样的字符串。这**不是**一种新的存储编码，它只是把 Unicode 身份证号直接写了出来。
+
+### \uXXXX (Unicode Escape Sequence)
+It is a **text representation** safe for ASCII-only environments (like old source code or JSON).
+这是一种**文本表示法**，用于在只支持 ASCII 的环境（如旧源代码或 JSON）中安全传输字符。
+
+**Example: "你"**
+1. Unicode ID: `U+4F60`
+2. Escape Sequence: `\u4f60`
+
+**How the computer reads `\u4f60`:**
+1. Sees `\u` -> "Ah, a Unicode character is coming!"
+2. Reads `4f60` (Hex) -> Converts to Integer `20320`.
+3. Looks up ID #20320 in the Unicode Table -> "It's '你'!"
+
+```python
+# Python Example
+print("\u4f60")  # Output: 你
+```
+
+---
+
+## 5. Summary Table (总结表)
 
 | System | Analogy (比喻) | Role (作用) |
 | :--- | :--- | :--- |
@@ -111,3 +136,4 @@ good_string = original_bytes.decode('utf-8')   # "你"
 | **UTF-8** | Flexible Shipping Box (伸缩快递盒) | Stores characters efficiently (Global standard). |
 | **GBK** | Compact Chinese Box (紧凑中文盒) | Stores Chinese efficiently (Legacy standard). |
 | **Mojibake** | Wrong Key for Lock (错误的钥匙) | Decoding bytes with the wrong rule. |
+| **\uXXXX** | The ID Card Number Written Down (写在纸上的身份证号) | A text way to represent a Unicode character. |
