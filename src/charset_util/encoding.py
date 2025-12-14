@@ -4,13 +4,17 @@ import charset_normalizer
 def detect(content: Union[bytes, str], chunk_size: Optional[int] = 1024 * 50) -> dict:
     """
     Detect the encoding of the given content.
+    检测给定内容的编码。
     
     Args:
         content: The content to analyze. If string, it will be encoded to utf-8 first (trivial case).
+                 要分析的内容。如果是字符串，会先被编码为 utf-8（平凡情况）。
         chunk_size: Maximum bytes to read for detection. Defaults to 50KB. Set to None to scan full content.
+                    检测时读取的最大字节数。默认为 50KB。设置为 None 则扫描全部内容。
         
     Returns:
         A dictionary containing 'encoding', 'confidence', and 'language'.
+        包含 'encoding' (编码), 'confidence' (置信度), 和 'language' (语言) 的字典。
     """
     if isinstance(content, str):
         content = content.encode('utf-8')
@@ -39,13 +43,17 @@ def detect(content: Union[bytes, str], chunk_size: Optional[int] = 1024 * 50) ->
 def convert(content: bytes, target_encoding: str = "utf-8") -> str:
     """
     Convert the content to the target encoding.
+    将内容转换为目标编码。
     
     Args:
         content: The bytes to convert.
+                 要转换的字节内容。
         target_encoding: The target encoding (default: utf-8).
+                         目标编码（默认：utf-8）。
         
     Returns:
         The decoded string.
+        解码后的字符串。
     """
     # For short content, charset_normalizer might be less accurate with GBK vs UTF-8
     # But here we trust it. 
