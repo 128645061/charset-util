@@ -4,6 +4,7 @@ import json
 import logging
 from .encoding import detect, convert
 from .recovery import repair_mojibake, decode_unicode_escapes
+from .inspector import inspect_text, explain_mojibake
 
 def setup_logging(verbose: bool):
     level = logging.DEBUG if verbose else logging.WARNING
@@ -42,6 +43,17 @@ def main():
     decode_parser = subparsers.add_parser("decode-escapes", help="Decode unicode escapes (e.g. \\u4f60) in text")
     decode_parser.add_argument("file", help="Path to the file containing unicode escapes")
     decode_parser.add_argument("-o", "--output", help="Path to output file (default: stdout)")
+
+    # Command: inspect
+    inspect_parser = subparsers.add_parser("inspect", help="Inspect character encodings (Educational)")
+    inspect_parser.add_argument("text", help="Text to inspect (or file path)")
+    inspect_parser.add_argument("--file", action="store_true", help="Treat 'text' argument as a file path")
+
+    # Command: explain-mojibake
+    explain_parser = subparsers.add_parser("explain-mojibake", help="Simulate and explain how mojibake happens")
+    explain_parser.add_argument("text", help="Original text")
+    explain_parser.add_argument("--source", default="utf-8", help="Source encoding (default: utf-8)")
+    explain_parser.add_argument("--wrong", default="latin-1", help="Wrong decoding (default: latin-1)")
 
     args = parser.parse_args()
 
@@ -94,6 +106,16 @@ def main():
                 print(f"Decoded content written to {args.output}")
             else:
                 print(result)
+
+        elif args.command == "inspect":
+            text_to_inspect = args.text
+            if args.file:
+                with open(args.text, "r", encoding="utf-8") as f:
+                    text_to_inspect = f.read()
+            print(inspect_text(text_to_inspect))
+
+        elif args.command == "explain-mojibake":
+            print(explain_mojibake(args.text, args.source, args.wrong))
 
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
