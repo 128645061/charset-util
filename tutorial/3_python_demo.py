@@ -10,7 +10,36 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
 sys.path.insert(0, project_root)
 
-from charset_util import inspect_text, explain_mojibake
+# Import necessary functions from tutorial helpers or define them here for simplicity
+# 为了保持教程的独立性，我们将必要的检查逻辑直接写在这里，不再依赖已删除的 inspector 模块
+# from charset_util import inspect_text, explain_mojibake (Removed)
+
+def inspect_text(text):
+    """Simple inline version of inspector logic"""
+    report = []
+    report.append(f"Analyzing Text: \"{text}\"")
+    report.append("-" * 60)
+    report.append(f"{'Char':<6} | {'Unicode':<10} | {'UTF-8 Bytes':<16} | {'GBK Bytes':<16}")
+    report.append("-" * 60)
+    for char in text:
+        utf8_hex = ' '.join(f'{b:02X}' for b in char.encode('utf-8'))
+        try:
+            gbk_hex = ' '.join(f'{b:02X}' for b in char.encode('gbk'))
+        except:
+            gbk_hex = "N/A"
+        report.append(f"{char:<6} | U+{ord(char):04X}     | {utf8_hex:<16} | {gbk_hex:<16}")
+    report.append("-" * 60)
+    return "\n".join(report)
+
+def explain_mojibake(text, source_encoding, wrong_decoding):
+    """Simple inline version of mojibake explainer"""
+    try:
+        raw_bytes = text.encode(source_encoding)
+        raw_hex = ' '.join(f'{b:02X}' for b in raw_bytes)
+        wrong_text = raw_bytes.decode(wrong_decoding, errors='replace')
+        return f"\n--- Mojibake Analysis ---\nOriginal: {text}\nBytes ({source_encoding}): {raw_hex}\nDecoded ({wrong_decoding}): {wrong_text}"
+    except Exception as e:
+        return f"Error: {e}"
 
 def main():
     print("==========================================")
