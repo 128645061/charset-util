@@ -53,6 +53,7 @@ def decode_unicode_escapes(text: str) -> str:
             return escape_seq
 
     # Pattern: backslash u followed by 4 hex chars
-    pattern = re.compile(r'\\u([0-9a-fA-F]{4})')
+    # We allow 1 or 2 backslashes to handle double-escaped sequences (common in some JSON dumps)
+    pattern = re.compile(r'\\{1,2}u([0-9a-fA-F]{4})')
     
     return pattern.sub(replace_match, text)
